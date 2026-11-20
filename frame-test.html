@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>apple-game size harness</title>
+<style>
+html,body{margin:0;background:#1f2230;font-family:system-ui,sans-serif;overflow:hidden}
+#lbl{color:#fff;font-size:12px;padding:6px 10px;height:22px}
+#wrap{transform-origin:0 0}
+iframe{border:0;background:#fff;display:block}
+</style>
+</head>
+<body>
+<div id="lbl"></div>
+<div id="wrap"><iframe id="f" title="preview"></iframe></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var w = parseInt(q.get('w'), 10) || 390;
+  var h = parseInt(q.get('h'), 10) || 844;
+  var f = document.getElementById('f');
+  f.width = w;
+  f.height = h;
+  var s = Math.min(1, (innerHeight - 40) / h, (innerWidth - 16) / w);
+  document.getElementById('wrap').style.transform = 'scale(' + s + ')';
+  document.getElementById('lbl').textContent = w + ' x ' + h + '  (scale ' + s.toFixed(3) + ')';
+  window.__errs = [];
+  window.__load = function (cb) {
+    f.onload = function () {
+      try {
+        f.contentWindow.addEventListener('error', function (e) {
+          window.__errs.push(String(e.message) + ' @' + e.lineno);
+        });
+        f.contentWindow.addEventListener('unhandledrejection', function (e) {
+          window.__errs.push('rejection ' + String(e.reason));
+        });
+      } catch (err) {}
+      if (cb) { cb(); }
+    };
+    f.src = './index.html?v=' + Date.now();
+  };
+  window.__doc = function () { return f.contentDocument; };
+  window.__rect = function () {
+    var r = f.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height,
+             vx: r.left / innerWidth * 1000, vy: r.top / innerHeight * 1000,
+             vw: r.width / innerWidth * 1000, vh: r.height / innerHeight * 1000 };
+  };
+  window.__metrics = function () {
+    var d = f.contentDocument, W = f.contentWindow;
+    var app = W.__apple, S = app.S;
+    var board = d.getElementById('board');
+    var wrap = d.getElementById('boardwrap');
+    var rect = board.getBoundingClientRect();
+    var wrect = wrap.getBoundingClientRect();
+    var de = d.documentElement;
+    var hud = d.getElementById('hudTop'), rail = d.getElementById('rail');
+    var cs = W.getComputedStyle;
+    return {
+      w: W.innerWidth, h: W.innerHeight,
+      scrollW: de.scrollWidth, scrollH: de.scrollHeight,
+      docClientW: de.clientWidth, docClientH: de.clientHeight,
+      bodyScrollW: d.body.scrollWidth, bodyScrollH: d.body.scrollHeight,
+      scrollX: W.scrollX, scrollY: W.scrollY,
+      cols: S.cols, rows: S.rows, cell: S.cell, gap: S.gap, pad: S.pad,
+      boardW: S.boardW, boardH: S.boardH,
+      boardRect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      wrapRect: { left: wrect.left, top: wrect.top, width: wrect.width, height: wrect.height },
+      tiles: S.tiles.length, alive: S.alive.filter(function (v) { return v; }).length,
+      phase: S.phase, score: S.score, popped: S.popped, timeLeft: S.timeLeft,
+      hudTop: cs(hud).display, rail: cs(rail).display,
+      titleFont: cs(d.querySelector('h1')).fontSize,
+      titleRect: (function () { var r = d.querySelector('h1').getBoundingClientRect(); return { left: r.left, width: r.width, center: r.left + r.width / 2 }; })(),
+      gaugeTop: cs(d.getElementById('gaugeTop')).width,
+      errs: window.__errs
+    };
+  };
+  window.__state = function () {
+    var S = f.contentWindow.__apple.S;
+    return { phase: S.phase, cols: S.cols, rows: S.rows, score: S.score,
+             popped: S.popped, timeLeft: S.timeLeft, alive: S.alive.filter(function (v) { return v; }).length,
+             drag: S.drag ? JSON.parse(JSON.stringify(S.drag)) : null };
+  };
+  window.__pt = function (r, c) {
+    var d = f.contentDocument, S = f.contentWindow.__apple.S;
+    var br = d.getElementById('board').getBoundingClientRect();
+    var pitch = S.cell + S.gap;
+    return { x: br.left + S.pad + c * pitch + S.cell / 2,
+             y: br.top + S.pad + r * pitch + S.cell / 2 };
+  };
+  window.__drag = function (r0, c0, r1, c1) {
+    var d = f.contentDocument, W = f.contentWindow;
+    var board = d.getElementById('board');
+    var a = window.__pt(r0, c0), b = window.__pt(r1, c1);
+    function ev(type, x, y) {
+      return new W.PointerEvent(type, { clientX: x, clientY: y, bubbles: true,
+        cancelable: true, pointerId: 7, pointerType: 'touch', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1 });
+    }
+    board.dispatchEvent(ev('pointerdown', a.x, a.y));
+    for (var i = 1; i <= 6; i++) {
+      var t = i / 6;
+      board.dispatchEvent(ev('pointermove', a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+    }
+    board.dispatchEvent(ev('pointerup', b.x, b.y));
+    __flushTimers();
+    return window.__state();
+  };
+  window.__flushTimers = function () {};
+  window.__findPair = function (want) {
+    var W = f.contentWindow, S = W.__apple.S, app = W.__apple;
+    for (var r = 0; r < S.rows; r++) {
+      for (var c = 0; c + 1 < S.cols; c++) {
+        var x = app.valueAt(r, c), y = app.valueAt(r, c + 1);
+        if (app.isAlive(r, c) && app.isAlive(r, c + 1) && x + y === want) { return [r, c, r, c + 1]; }
+      }
+    }
+    return null;
+  };
+  window.__findNotTen = function () {
+    var W = f.contentWindow, S = W.__apple.S, app = W.__apple;
+    for (var r = 0; r < S.rows; r++) {
+      for (var c = 0; c + 1 < S.cols; c++) {
+        var x = app.valueAt(r, c), y = app.valueAt(r, c + 1);
+        if (app.isAlive(r, c) && app.isAlive(r, c + 1) && x + y !== 10) { return [r, c, r, c + 1]; }
+      }
+    }
+    return null;
+  };
+  window.__values = function () {
+    var S = f.contentWindow.__apple.S;
+    return S.values.slice();
+  };
+  window.__click = function (id) {
+    var d = f.contentDocument;
+    d.getElementById(id).click();
+    return window.__state();
+  };
+})();
+</script>
+</body>
+</html>
