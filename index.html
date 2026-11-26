@@ -48,6 +48,8 @@ button{font-family:inherit;cursor:pointer;touch-action:manipulation}
 }
 .sub{margin:3px 0 0;text-align:center;font-size:11.5px;font-weight:800;color:#78ab8d;letter-spacing:-.01em;white-space:nowrap}
 .toptools{display:flex;justify-content:flex-end;align-items:center;gap:7px;padding:5px 1px 7px}
+/* 🏠 다른 게임은 소리·다시 버튼과 같은 줄의 맨 왼쪽에 붙인다 */
+.toptools .homebtn{margin-right:auto}
 .toolbtn{
   display:inline-flex;align-items:center;gap:5px;border:1.5px solid #bbf7d0;background:#fff;
   color:#15803d;font-size:12.5px;font-weight:800;letter-spacing:-.01em;
@@ -243,6 +245,24 @@ button{font-family:inherit;cursor:pointer;touch-action:manipulation}
   -webkit-tap-highlight-color:transparent;white-space:nowrap;
 }
 .homebtn:active{transform:translateY(1px)}
+/* 🏆 기록 버튼: 작고 흐려서 잘 안 보인다는 요청으로 금색 네모 버튼으로 키웠다 */
+.toptools .recbtn{
+  display:inline-flex;align-items:center;justify-content:center;gap:4px;
+  height:34px;padding:0 13px;border-radius:11px;
+  background:linear-gradient(180deg,#FFE082 0%,#F7A928 100%);
+  border:1.6px solid #DB8608;color:#4E2C00;
+  font-family:inherit;font-size:13.5px;font-weight:900;letter-spacing:-.02em;line-height:1;
+  box-shadow:0 2px 0 #C97A00,0 5px 12px rgba(201,122,0,.24);
+  white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;
+}
+.toptools .recbtn:active{transform:translateY(1px);box-shadow:0 1px 0 #C97A00}
+/* 게임 도중에도 여는 🏆 기록 창 (결과 화면의 기록 칸을 그대로 창 안으로 옮겨 쓴다) */
+.recdlg{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:14px;background:rgba(17,24,39,.45)}
+.recdlg[hidden]{display:none}
+.recdlg-card{width:100%;max-width:330px;max-height:calc(100% - 10px);overflow:auto;background:#fff;border-radius:20px;padding:12px;box-shadow:0 20px 44px rgba(15,23,42,.3)}
+.recdlg-card .grec{margin:0;padding:0;border:0;background:transparent}
+.recdlg-close{width:100%;height:40px;margin-top:10px;border:none;border-radius:12px;background:#eef2f7;color:#42516a;font:inherit;font-size:14px;font-weight:900;cursor:pointer}
+.recdlg-close:active{background:#e2e8f1}
 /* ==== /RECORD PANEL ==== */
 </style>
 </head>
@@ -278,6 +298,7 @@ button{font-family:inherit;cursor:pointer;touch-action:manipulation}
     <button id="resetBtn" class="toolbtn" type="button" aria-label="게임을 처음부터 다시">
       <span class="tico">🔄</span><span>다시</span>
     </button>
+    <button id="recOpenBtn" class="recbtn" type="button" aria-label="기록 남기기">🏆 기록</button>
   </div>
 
   <main class="stage">
@@ -326,6 +347,13 @@ button{font-family:inherit;cursor:pointer;touch-action:manipulation}
       <div class="railclock" id="timeRail">120초</div>
     </aside>
   </main>
+</div>
+
+<div class="recdlg" id="recDlg" hidden>
+  <div class="recdlg-card" role="dialog" aria-modal="true" aria-label="기록 남기기">
+    <div id="recDlgHost"></div>
+    <button class="recdlg-close" id="recDlgClose" type="button">닫고 계속 놀기</button>
+  </div>
 </div>
 
 <script>
@@ -595,7 +623,7 @@ var GameRec = (function () {
     cell: 34, gap: 3, pad: 6, boardW: 0, boardH: 0,
     score: 0, popped: 0,
     phase: 'ready', timeLeft: TOTAL_MS, last: 0, timer: null,
-    drag: null, muted: false
+    drag: null, muted: false, recPause: false
   };
 
   /* ---------- rng (seedable, so the rules can be tested) ---------- */
@@ -977,6 +1005,7 @@ var GameRec = (function () {
   function tick() {
     if (S.phase !== 'play') { return; }
     var now = Date.now();
+    if (S.recPause) { S.last = now; return; }
     var dt = now - (S.last || now);
     S.last = now;
     if (dt > 0) { advance(dt); }
@@ -997,6 +1026,8 @@ var GameRec = (function () {
   function startRound() {
     if (S.phase === 'play') { return; }
     unlockAudio();
+    closeRecDlg();
+    S.recPause = false;
     GameRec.reset();
     S.phase = 'play';
     S.timeLeft = TOTAL_MS;
@@ -1021,6 +1052,7 @@ var GameRec = (function () {
     $('praise').textContent = praiseFor(S.score);
     $('result').hidden = false;
     $('ready').hidden = true;
+    if (GameRec.isSent()) { GameRec.reset(); }   /* 게임 중에 남긴 기록과 별개로 최종 점수도 남길 수 있게 */
     GameRec.show();
     sfx('end');
   }
@@ -1033,6 +1065,7 @@ var GameRec = (function () {
 
   function reset() {
     if (S.timer) { clearInterval(S.timer); S.timer = null; }
+    closeRecDlg();
     S.phase = 'ready';
     S.timeLeft = TOTAL_MS;
     S.score = 0;
@@ -1054,6 +1087,25 @@ var GameRec = (function () {
     $('sndOffIcon').hidden = !S.muted;
     toggleClass($('sndBtn'), 'off', S.muted);
     $('sndBtn').setAttribute('aria-label', S.muted ? '효과음 켜기' : '효과음 끄기');
+  }
+
+  /* ---------- 기록 창 (게임 중에도 점수를 남길 수 있게) ---------- */
+  var REC_HOME = 'recSlot';
+  function openRecDlg() {
+    var box = $('grec'), host = $('recDlgHost'), dlg = $('recDlg');
+    if (!box || !host || !dlg || !dlg.hidden) { return; }
+    host.appendChild(box);              /* 결과 화면의 기록 칸을 창 안으로 옮긴다 */
+    GameRec.show();                     /* 지금 점수로 요약을 새로 고친다 */
+    dlg.hidden = false;
+    if (S.phase === 'play') { S.recPause = true; }   /* 적는 동안 120초가 흐르지 않게 */
+  }
+  function closeRecDlg() {
+    var dlg = $('recDlg'), box = $('grec'), home = $(REC_HOME);
+    if (!dlg || dlg.hidden) { return; }
+    dlg.hidden = true;
+    if (box && home && box.parentNode !== home) { home.appendChild(box); }
+    GameRec.hide();
+    if (S.recPause) { S.recPause = false; S.last = Date.now(); }
   }
 
   /* ---------- mode / resize ---------- */
@@ -1099,6 +1151,8 @@ var GameRec = (function () {
     board.addEventListener('contextmenu', function (e) { if (e.preventDefault) { e.preventDefault(); } });
 
     $('startBtn').addEventListener('click', startRound);
+    $('recOpenBtn').addEventListener('click', function () { unlockAudio(); sfx('start'); openRecDlg(); });
+    $('recDlgClose').addEventListener('click', function () { sfx('pop', 2); closeRecDlg(); });
     $('againBtn').addEventListener('click', reset);
     $('resetBtn').addEventListener('click', function () { sfx('no'); reset(); });
     $('sndBtn').addEventListener('click', function () {
